@@ -1,20 +1,75 @@
 import streamlit as st
 import pandas as pd
 
-from core.auth import exigir_login, eh_admin, get_client
+from core.auth import exigir_login, eh_admin, get_client, CARGOS, enviar_reset_senha
 from core.parametros_db import carregar_parametros, salvar_faixas, salvar_geral
 
 st.set_page_config(page_title="Administração — Painel DP", page_icon="🛠️", layout="wide")
 exigir_login()
 
 if not eh_admin():
-    st.error("Esta página é restrita a administradores.")
+    st.error("Esta página é restrita a gerentes e diretores.")
     st.stop()
 
 st.title("🛠️ Administração")
 sb = get_client()
 
-aba_clientes, aba_acesso, aba_parametros = st.tabs(["Clientes", "Acesso dos analistas", "Parâmetros fiscais (Férias)"])
+aba_equipe, aba_clientes, aba_acesso, aba_parametros = st.tabs(
+    ["Equipe (cargos e hierarquia)", "Clientes", "Acesso da equipe", "Parâmetros fiscais (Férias)"]
+)
+
+# -------------------------------------------------------------------- Equipe
+with aba_equipe:
+    st.subheader("Cargos e hierarquia")
+    st.caption(
+        "Cada pessoa cria a própria conta na tela de login (aba 'Criar conta'). "
+        "Aqui você define o cargo dela e quem é o supervisor direto — isso decide "
+        "automaticamente quais clientes ela enxerga: um coordenador/gerente vê os "
+        "clientes liberados para ele **e** para todo mundo abaixo dele na hierarquia; "
+        "o diretor vê todos os clientes, de todas as equipes."
+    )
+    perfis_todos = sb.table("perfis").select("*").order("nome_completo").execute().data
+
+    if not perfis_todos:
+        st.info("Ainda não há ninguém cadastrado. Peça para a pessoa criar a conta na tela de login.")
+    else:
+        mapa_nome = {p["id"]: (p.get("nome_completo") or p["id"]) for p in perfis_todos}
+        for p in perfis_todos:
+            with st.container(border=True):
+                col1, col2, col3, col4 = st.columns([2, 1, 2, 1])
+                col1.write(f"**{p.get('nome_completo') or '(sem nome)'}**")
+                cargo_atual = p.get("cargo", "analista")
+                novo_cargo = col2.selectbox(
+                    "Cargo", options=CARGOS, index=CARGOS.index(cargo_atual) if cargo_atual in CARGOS else 0,
+                    key=f"cargo_{p['id']}", label_visibility="collapsed",
+                )
+                opcoes_supervisor = {"— sem supervisor —": None}
+                opcoes_supervisor.update({nome: pid for pid, nome in mapa_nome.items() if pid != p["id"]})
+                supervisor_atual = p.get("supervisor_id")
+                nome_supervisor_atual = mapa_nome.get(supervisor_atual, "— sem supervisor —") if supervisor_atual else "— sem supervisor —"
+                opcoes_lista = list(opcoes_supervisor.keys())
+                novo_supervisor_nome = col3.selectbox(
+                    "Supervisor", options=opcoes_lista,
+                    index=opcoes_lista.index(nome_supervisor_atual) if nome_supervisor_atual in opcoes_lista else 0,
+                    key=f"sup_{p['id']}", label_visibility="collapsed",
+                )
+                if col4.button("Salvar", key=f"salvar_{p['id']}"):
+                    sb.table("perfis").update({
+                        "cargo": novo_cargo,
+                        "supervisor_id": opcoes_supervisor[novo_supervisor_nome],
+                    }).eq("id", p["id"]).execute()
+                    st.success("Atualizado.")
+                    st.rerun()
+                email_pessoa = p.get("email")
+                if email_pessoa:
+                    if st.button(f"✉️ Enviar redefinição de senha ({email_pessoa})", key=f"reset_{p['id']}"):
+                        try:
+                            enviar_reset_senha(email_pessoa)
+                            st.toast(f"E-mail de redefinição enviado para {email_pessoa}.")
+                        except Exception as e:
+                            st.error(f"Não consegui enviar: {e}")
+                else:
+                    col4.caption("Sem e-mail registrado ainda.")
 
 # ---------------------------------------------------------------- Clientes
 with aba_clientes:
@@ -70,8 +125,8 @@ with aba_acesso:
         st.dataframe(pd.DataFrame(linhas), use_container_width=True)
 
     st.caption(
-        "Novos analistas são criados direto no painel do Supabase (Authentication → Add user) "
-        "com e-mail e senha provisória. Depois de criado, ele aparece aqui para você liberar os clientes."
+        "Cada pessoa cria a própria conta na tela de login. Depois disso ela aparece aqui "
+        "para você liberar os clientes — e na aba 'Equipe' para definir cargo e supervisor."
     )
 
 # --------------------------------------------------------- Parâmetros fiscais

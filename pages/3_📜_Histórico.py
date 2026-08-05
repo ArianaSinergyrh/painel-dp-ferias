@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from core.auth import exigir_login, empresas_do_usuario, get_client, eh_admin
+from core.auth import exigir_login, empresas_do_usuario, get_client
 
 st.set_page_config(page_title="Histórico — Painel DP", page_icon="📜", layout="wide")
 exigir_login()
@@ -12,9 +12,14 @@ sb = get_client()
 empresas = empresas_do_usuario()
 ids_empresas = [e["id"] for e in empresas]
 
-query = sb.table("processamentos").select("*, empresas(nome), perfis(nome_completo)").order("criado_em", desc=True)
-if not eh_admin():
-    query = query.in_("empresa_id", ids_empresas or [-1])
+# empresas_do_usuario() já respeita a hierarquia (analista só o dele; coordenador/gerente
+# tudo que a equipe abaixo enxerga; diretor, todos os clientes) — então basta filtrar por ela.
+query = (
+    sb.table("processamentos")
+    .select("*, empresas(nome), perfis(nome_completo)")
+    .in_("empresa_id", ids_empresas or [-1])
+    .order("criado_em", desc=True)
+)
 registros = query.limit(200).execute().data
 
 if not registros:
