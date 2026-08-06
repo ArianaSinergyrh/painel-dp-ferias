@@ -10,7 +10,15 @@ novo vira só mais uma página em `pages/` + um módulo em `core/`.
 """
 import streamlit as st
 
-from core.auth import exigir_login, eh_admin, empresas_do_usuario, sign_out, cargo_do_usuario, trocar_senha
+from core.auth import (
+    exigir_login,
+    eh_admin,
+    empresas_do_usuario,
+    sign_out,
+    cargo_do_usuario,
+    trocar_senha,
+    recarregar_perfil,
+)
 
 st.set_page_config(page_title="Painel DP — Sinergy", page_icon="🗂️", layout="wide")
 
@@ -34,6 +42,13 @@ with st.sidebar:
                     st.success("Senha alterada.")
                 except Exception as e:
                     st.error(f"Não consegui trocar: {e}")
+    if st.button("🔄 Recarregar meu perfil"):
+        try:
+            recarregar_perfil()
+            st.toast("Perfil atualizado.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não consegui recarregar: {e}")
     if st.button("Sair"):
         sign_out()
         st.rerun()
