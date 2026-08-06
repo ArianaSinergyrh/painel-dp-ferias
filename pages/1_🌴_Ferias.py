@@ -3,6 +3,7 @@ import streamlit as st
 from core.auth import exigir_login, empresas_do_usuario, get_client, eh_admin
 from core.calculo import carregar_workbook, calcular_conferencia, resumo, gerar_excel_bytes, FormatoInvalido
 from core.parametros_db import carregar_parametros
+from core.auditoria import registrar, ACAO_CONFERENCIA, ACAO_HISTORICO
 
 st.set_page_config(page_title="Férias — Painel DP", page_icon="🌴", layout="wide")
 exigir_login()
@@ -49,6 +50,18 @@ if arquivo is not None:
 
     st.success(f"{r['total_funcionarios']} funcionários processados para {empresa_nome}.")
 
+    # o log é automático: toda conferência processada fica registrada,
+    # independente de a pessoa clicar em "registrar no histórico"
+    chave_log = f"{empresa_id}|{arquivo.name}|{r['total_funcionarios']}"
+    if st.session_state.get("_ultima_conferencia_logada") != chave_log:
+        registrar(
+            ACAO_CONFERENCIA,
+            detalhe=(f"Arquivo '{arquivo.name}' — {r['total_funcionarios']} funcionários: "
+                     f"{r['ok']} OK, {r['verificar']} a verificar, {r['sem_dados']} sem dados"),
+            empresa_id=empresa_id, empresa_nome=empresa_nome,
+        )
+        st.session_state["_ultima_conferencia_logada"] = chave_log
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("OK", r["ok"])
     c2.metric("A verificar", r["verificar"], delta_color="inverse")
@@ -85,6 +98,8 @@ if arquivo is not None:
             "total_verificar": r["verificar"],
             "total_sem_dados": r["sem_dados"],
         }).execute()
+        registrar(ACAO_HISTORICO, detalhe=f"Arquivo '{arquivo.name}'",
+                  empresa_id=empresa_id, empresa_nome=empresa_nome)
         st.toast("Processamento registrado no histórico.")
 
     with st.expander("Como ler os status"):
