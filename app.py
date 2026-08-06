@@ -18,6 +18,7 @@ from core.auth import (
     cargo_do_usuario,
     trocar_senha,
     recarregar_perfil,
+    barra_lateral,
 )
 from core.auditoria import registrar, ACAO_LOGIN, ACAO_SENHA_PROPRIA
 
@@ -30,35 +31,7 @@ if not st.session_state.get("_login_logado"):
     registrar(ACAO_LOGIN)
     st.session_state["_login_logado"] = True
 
-with st.sidebar:
-    st.write(f"👤 {st.session_state.get('user_email', '')}")
-    with st.expander("🔑 Trocar minha senha"):
-        with st.form("trocar_senha_form"):
-            nova = st.text_input("Nova senha", type="password")
-            confirma = st.text_input("Confirme a nova senha", type="password")
-            trocar = st.form_submit_button("Salvar nova senha")
-        if trocar:
-            if not nova or nova != confirma:
-                st.error("As senhas precisam ser preenchidas e iguais.")
-            elif len(nova) < 6:
-                st.error("A senha precisa ter pelo menos 6 caracteres.")
-            else:
-                try:
-                    trocar_senha(nova)
-                    registrar(ACAO_SENHA_PROPRIA)
-                    st.success("Senha alterada.")
-                except Exception as e:
-                    st.error(f"Não consegui trocar: {e}")
-    if st.button("🔄 Recarregar meu perfil"):
-        try:
-            recarregar_perfil()
-            st.toast("Perfil atualizado.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Não consegui recarregar: {e}")
-    if st.button("Sair"):
-        sign_out()
-        st.rerun()
+barra_lateral()
 
 st.title("🗂️ Painel DP — Automação de Processos")
 st.caption("Escolha um processo no menu à esquerda para começar.")
