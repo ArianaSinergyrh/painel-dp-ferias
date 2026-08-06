@@ -15,6 +15,8 @@ para um cookie persistente depois, se fizer falta).
 """
 from __future__ import annotations
 
+import time
+
 import streamlit as st
 from supabase import create_client, Client
 
@@ -88,24 +90,45 @@ def _limpar_cookie_sessao():
 
 def _restaurar_sessao() -> bool:
     """Tenta reabrir a sessão a partir do cookie. Retorna True se conseguiu.
-    É o que faz o F5 (ou reabrir a aba) não cair de volta na tela de senha."""
-    if not _TEM_COOKIE or st.session_state.get("_restauracao_tentada"):
+    É o que faz o F5 (ou reabrir a aba) não cair de volta na tela de senha.
+
+    Detalhe importante: o CookieManager é um componente de front-end. Na PRIMEIRA
+    execução do script ele ainda não devolveu os cookies do navegador — retorna
+    vazio. Só num ciclo seguinte o valor chega. Por isso aqui a gente dá algumas
+    chances antes de desistir; sem isso o painel concluía "não tem cookie" cedo
+    demais e mostrava a tela de senha mesmo com a sessão salva."""
+    if not _TEM_COOKIE or st.session_state.get("_sessao_restaurada_falhou"):
         return False
-    st.session_state["_restauracao_tentada"] = True
+
     try:
-        token = _gerenciador_cookies().get(COOKIE_SESSAO)
+        mgr = _gerenciador_cookies()
+        cookies = mgr.get_all()
     except Exception:
+        st.session_state["_sessao_restaurada_falhou"] = True
         return False
+
+    token = (cookies or {}).get(COOKIE_SESSAO)
+
     if not token:
+        tentativas = st.session_state.get("_tentativas_cookie", 0)
+        if tentativas < 4:
+            # o componente ainda não respondeu — espera um instante e tenta de novo
+            st.session_state["_tentativas_cookie"] = tentativas + 1
+            with st.spinner("Retomando sua sessão..."):
+                time.sleep(0.45)
+            st.rerun()
+        st.session_state["_sessao_restaurada_falhou"] = True
         return False
+
     try:
         sb = get_client()
         resp = sb.auth.refresh_session(token)
         if not resp or not resp.user or not resp.session:
-            return False
+            raise RuntimeError("sessão expirada")
         perfil, empresas = _buscar_perfil(resp.user.id)
     except Exception:
         _limpar_cookie_sessao()
+        st.session_state["_sessao_restaurada_falhou"] = True
         return False
 
     st.session_state["access_token"] = resp.session.access_token
@@ -187,7 +210,8 @@ def sign_out():
     except Exception:
         pass
     for k in ["access_token", "refresh_token", "user_id", "user_email", "perfil",
-              "empresas_acessiveis", "_restauracao_tentada", "_login_logado"]:
+              "empresas_acessiveis", "_login_logado",
+              "_tentativas_cookie", "_sessao_restaurada_falhou"]:
         st.session_state.pop(k, None)
     _limpar_cookie_sessao()
 
