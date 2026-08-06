@@ -11,11 +11,12 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from core.auth import exigir_login, cargo_do_usuario
+from core.auth import exigir_login, cargo_do_usuario, barra_lateral
 from core.auditoria import buscar, ACOES
 
 st.set_page_config(page_title="Log de Atividades — Painel DP", page_icon="📋", layout="wide")
 exigir_login()
+barra_lateral()
 
 st.title("📋 Log de Atividades")
 
