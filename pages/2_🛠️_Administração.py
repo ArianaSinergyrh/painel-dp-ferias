@@ -75,11 +75,35 @@ with aba_equipe:
                 if not pode_cargo:
                     col4.caption(f"🔒 {motivo_cargo}")
 
+                # Mudar o próprio cargo é permitido para diretor, mas pede
+                # confirmação: se ela se rebaixar e não houver outro diretor,
+                # só volta com SQL no banco.
+                sou_eu = p["id"] == st.session_state.get("user_id")
+                confirmou = True
+                if sou_eu and pode_cargo and novo_cargo != cargo_atual:
+                    outros_diretores = sum(
+                        1 for x in perfis_todos
+                        if x.get("cargo") == "diretor" and x["id"] != p["id"]
+                    )
+                    if novo_cargo != "diretor" and outros_diretores == 0:
+                        st.warning(
+                            f"Você está mudando o **seu próprio** cargo de diretor para "
+                            f"**{novo_cargo}** e não há outro diretor cadastrado. Depois disso "
+                            "ninguém no painel poderá te devolver o cargo de diretor — só dá "
+                            "para consertar rodando SQL direto no Supabase."
+                        )
+                        confirmou = st.checkbox(
+                            "Entendi o risco e quero mudar mesmo assim",
+                            key=f"confirma_{p['id']}",
+                        )
+
                 if col4.button("Salvar", key=f"salvar_{p['id']}"):
                     # O banco também barra isso (trigger valida_alteracao_cargo);
                     # aqui é só para a pessoa entender o motivo antes de tentar.
                     if novo_cargo != cargo_atual and not pode_cargo:
                         st.error(motivo_cargo)
+                    elif not confirmou:
+                        st.error("Marque a confirmação acima para prosseguir.")
                     else:
                         try:
                             sb.table("perfis").update({
