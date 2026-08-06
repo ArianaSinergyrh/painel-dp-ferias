@@ -1,6 +1,6 @@
 import streamlit as st
 
-from core.auth import exigir_login, empresas_do_usuario, get_client
+from core.auth import exigir_login, empresas_do_usuario, get_client, eh_admin
 from core.calculo import carregar_workbook, calcular_conferencia, resumo, gerar_excel_bytes, FormatoInvalido
 from core.parametros_db import carregar_parametros
 
@@ -16,7 +16,17 @@ st.caption(
 
 empresas = empresas_do_usuario()
 if not empresas:
-    st.warning("Você não tem acesso a nenhum cliente ainda. Peça a um administrador para liberar.")
+    if eh_admin():
+        st.warning(
+            "Ainda não há nenhum cliente cadastrado. Vá em **🛠️ Administração → Clientes**, "
+            "cadastre pelo menos um cliente e volte aqui — o campo de upload aparece logo abaixo "
+            "da escolha do cliente."
+        )
+    else:
+        st.warning(
+            "Você não tem acesso a nenhum cliente ainda. Peça a um gerente ou diretor para "
+            "liberar seu acesso em Administração → Acesso da equipe."
+        )
     st.stop()
 
 nomes_empresas = {e["nome"]: e["id"] for e in empresas}
