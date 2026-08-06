@@ -18,6 +18,12 @@ from __future__ import annotations
 import streamlit as st
 from supabase import create_client, Client
 
+try:
+    import extra_streamlit_components as stx
+    _TEM_COOKIE = True
+except Exception:      # se a biblioteca faltar, o painel segue funcionando
+    _TEM_COOKIE = False
+
 CARGOS = ["analista", "coordenador", "gerente", "diretor"]
 
 # Nível de cada cargo. Serve para responder "posso mexer no cargo desta pessoa?"
@@ -29,8 +35,12 @@ NIVEL_CARGO = {"analista": 0, "coordenador": 1, "gerente": 2, "diretor": 3}
 # erro ali afeta o cálculo de todos os clientes.
 CARGOS_GESTAO = ("gerente", "diretor")
 
-# Cargos e acessos da equipe: coordenador para cima.
+# Cargos e acessos da equipe, e ajuste das tabelas de INSS/IRRF: coordenador
+# para cima. (Cadastro de cliente segue em CARGOS_GESTAO.)
 CARGOS_EQUIPE = ("coordenador", "gerente", "diretor")
+
+# Nome do cookie que mantém a pessoa logada depois de um F5.
+COOKIE_SESSAO = "painel_dp_sessao"
 
 
 @st.cache_resource
@@ -38,6 +48,74 @@ def get_client() -> Client:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_ANON_KEY"]
     return create_client(url, key)
+
+
+def _gerenciador_cookies():
+    """O CookieManager desenha um componente na tela, então não pode ficar dentro
+    de função cacheada — o Streamlit recusa widget em @st.cache_resource.
+    Guardamos a instância no session_state, que sobrevive aos reruns."""
+    if not _TEM_COOKIE:
+        return None
+    if "_cookie_mgr" not in st.session_state:
+        st.session_state["_cookie_mgr"] = stx.CookieManager(key="painel_dp_cookie_mgr")
+    return st.session_state["_cookie_mgr"]
+
+
+def _guardar_sessao(refresh_token: str):
+    """Grava o refresh token num cookie para a pessoa continuar logada após um
+    F5. Guardamos só o refresh token (não a senha, não o token de acesso)."""
+    if not _TEM_COOKIE:
+        return
+    try:
+        from datetime import datetime, timedelta
+        _gerenciador_cookies().set(
+            COOKIE_SESSAO, refresh_token,
+            expires_at=datetime.now() + timedelta(days=7),
+            key="set_sessao",
+        )
+    except Exception:
+        pass
+
+
+def _limpar_cookie_sessao():
+    if not _TEM_COOKIE:
+        return
+    try:
+        _gerenciador_cookies().delete(COOKIE_SESSAO, key="del_sessao")
+    except Exception:
+        pass
+
+
+def _restaurar_sessao() -> bool:
+    """Tenta reabrir a sessão a partir do cookie. Retorna True se conseguiu.
+    É o que faz o F5 (ou reabrir a aba) não cair de volta na tela de senha."""
+    if not _TEM_COOKIE or st.session_state.get("_restauracao_tentada"):
+        return False
+    st.session_state["_restauracao_tentada"] = True
+    try:
+        token = _gerenciador_cookies().get(COOKIE_SESSAO)
+    except Exception:
+        return False
+    if not token:
+        return False
+    try:
+        sb = get_client()
+        resp = sb.auth.refresh_session(token)
+        if not resp or not resp.user or not resp.session:
+            return False
+        perfil, empresas = _buscar_perfil(resp.user.id)
+    except Exception:
+        _limpar_cookie_sessao()
+        return False
+
+    st.session_state["access_token"] = resp.session.access_token
+    st.session_state["refresh_token"] = resp.session.refresh_token
+    st.session_state["user_id"] = resp.user.id
+    st.session_state["user_email"] = resp.user.email
+    st.session_state["perfil"] = perfil
+    st.session_state["empresas_acessiveis"] = empresas
+    _guardar_sessao(resp.session.refresh_token)
+    return True
 
 
 def sign_in(email: str, password: str):
@@ -70,6 +148,7 @@ def sign_in(email: str, password: str):
     st.session_state["user_email"] = resp.user.email
     st.session_state["perfil"] = perfil
     st.session_state["empresas_acessiveis"] = empresas
+    _guardar_sessao(resp.session.refresh_token)
 
 
 def sign_up(email: str, password: str, nome_completo: str):
@@ -107,8 +186,10 @@ def sign_out():
         sb.auth.sign_out()
     except Exception:
         pass
-    for k in ["access_token", "refresh_token", "user_id", "user_email", "perfil", "empresas_acessiveis"]:
+    for k in ["access_token", "refresh_token", "user_id", "user_email", "perfil",
+              "empresas_acessiveis", "_restauracao_tentada", "_login_logado"]:
         st.session_state.pop(k, None)
+    _limpar_cookie_sessao()
 
 
 def _buscar_perfil(user_id: str):
@@ -179,6 +260,11 @@ def gere_equipe() -> bool:
     return cargo_do_usuario() in CARGOS_EQUIPE
 
 
+def pode_editar_parametros() -> bool:
+    """Quem ajusta as tabelas de INSS/IRRF (coordenador para cima)."""
+    return cargo_do_usuario() in CARGOS_EQUIPE
+
+
 def meu_nivel() -> int:
     return NIVEL_CARGO.get(cargo_do_usuario(), 0)
 
@@ -213,6 +299,8 @@ def exigir_login():
     """Chame no topo de cada página. Mostra login/cadastro e para a
     execução da página se o usuário ainda não estiver autenticado."""
     if esta_logado():
+        return
+    if _restaurar_sessao():
         return
 
     st.title("🔐 Painel DP — Login")
@@ -262,3 +350,44 @@ def exigir_login():
                     st.error(f"Não consegui criar a conta: {e}")
 
     st.stop()
+
+
+def barra_lateral():
+    """Barra lateral padrão de todas as páginas: quem está logado, trocar senha,
+    recarregar perfil e sair. Antes o botão Sair só existia na página inicial —
+    quem estivesse em Férias ou no Log não tinha como sair sem voltar."""
+    from core.auditoria import registrar, ACAO_SENHA_PROPRIA
+
+    with st.sidebar:
+        st.write(f"👤 {st.session_state.get('user_email', '')}")
+        st.caption(f"Perfil: **{cargo_do_usuario().capitalize()}**")
+
+        with st.expander("🔑 Trocar minha senha"):
+            with st.form("trocar_senha_form_lateral"):
+                nova = st.text_input("Nova senha", type="password")
+                confirma = st.text_input("Confirme a nova senha", type="password")
+                trocar = st.form_submit_button("Salvar nova senha")
+            if trocar:
+                if not nova or nova != confirma:
+                    st.error("As senhas precisam ser preenchidas e iguais.")
+                elif len(nova) < 6:
+                    st.error("A senha precisa ter pelo menos 6 caracteres.")
+                else:
+                    try:
+                        trocar_senha(nova)
+                        registrar(ACAO_SENHA_PROPRIA)
+                        st.success("Senha alterada.")
+                    except Exception as e:
+                        st.error(f"Não consegui trocar: {e}")
+
+        if st.button("🔄 Recarregar meu perfil", key="btn_recarregar_lateral"):
+            try:
+                recarregar_perfil()
+                st.toast("Perfil atualizado.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não consegui recarregar: {e}")
+
+        if st.button("🚪 Sair", key="btn_sair_lateral", type="primary"):
+            sign_out()
+            st.rerun()
