@@ -3,6 +3,8 @@ import pandas as pd
 
 from core.auth import exigir_login, eh_admin, get_client, CARGOS, enviar_reset_senha
 from core.parametros_db import carregar_parametros, salvar_faixas, salvar_geral
+from core.auditoria import (registrar, ACAO_CLIENTE_NOVO, ACAO_ACESSO_LIBERADO,
+                            ACAO_CARGO_ALTERADO, ACAO_PARAMETROS, ACAO_RESET_SENHA)
 
 st.set_page_config(page_title="Administração — Painel DP", page_icon="🛠️", layout="wide")
 exigir_login()
@@ -58,6 +60,9 @@ with aba_equipe:
                         "cargo": novo_cargo,
                         "supervisor_id": opcoes_supervisor[novo_supervisor_nome],
                     }).eq("id", p["id"]).execute()
+                    registrar(ACAO_CARGO_ALTERADO,
+                              detalhe=(f"{p.get('nome_completo') or p['id']}: cargo '{cargo_atual}' → "
+                                       f"'{novo_cargo}'; supervisor → {novo_supervisor_nome}"))
                     st.success("Atualizado.")
                     st.rerun()
                 email_pessoa = p.get("email")
@@ -65,6 +70,7 @@ with aba_equipe:
                     if st.button(f"✉️ Enviar redefinição de senha ({email_pessoa})", key=f"reset_{p['id']}"):
                         try:
                             enviar_reset_senha(email_pessoa)
+                            registrar(ACAO_RESET_SENHA, detalhe=f"Para {email_pessoa}")
                             st.toast(f"E-mail de redefinição enviado para {email_pessoa}.")
                         except Exception as e:
                             st.error(f"Não consegui enviar: {e}")
@@ -84,6 +90,8 @@ with aba_clientes:
         enviar = st.form_submit_button("Cadastrar")
     if enviar and nome:
         sb.table("empresas").insert({"nome": nome, "cnpj": cnpj, "ativo": True}).execute()
+        registrar(ACAO_CLIENTE_NOVO, detalhe=f"Cliente '{nome}'" + (f" (CNPJ {cnpj})" if cnpj else ""),
+                  empresa_nome=nome)
         st.success(f"Cliente '{nome}' cadastrado.")
         st.rerun()
 
@@ -108,6 +116,8 @@ with aba_acesso:
                 "usuario_id": mapa_perfil[analista],
                 "empresa_id": mapa_empresa[cliente],
             }).execute()
+            registrar(ACAO_ACESSO_LIBERADO, detalhe=f"{analista} passou a acessar '{cliente}'",
+                      empresa_id=mapa_empresa[cliente], empresa_nome=cliente)
             st.success(f"Acesso liberado: {analista} → {cliente}")
 
         st.write("Acessos atuais:")
@@ -169,4 +179,8 @@ with aba_parametros:
         salvar_geral("redutor_limite", redutor_limite)
         salvar_geral("redutor_a", redutor_a)
         salvar_geral("redutor_b", redutor_b)
+        registrar(ACAO_PARAMETROS,
+                  detalhe=(f"INSS {len(df_inss_edit)} faixas, IRRF {len(df_irrf_edit)} faixas; "
+                           f"dependente R$ {dep_deducao}, simplificada R$ {ded_simplificada}, "
+                           f"tolerância R$ {tolerancia}"))
         st.success("Parâmetros salvos. Já valem para o próximo processamento.")
