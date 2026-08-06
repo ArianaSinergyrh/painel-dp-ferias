@@ -19,10 +19,16 @@ from core.auth import (
     trocar_senha,
     recarregar_perfil,
 )
+from core.auditoria import registrar, ACAO_LOGIN, ACAO_SENHA_PROPRIA
 
 st.set_page_config(page_title="Painel DP — Sinergy", page_icon="🗂️", layout="wide")
 
 exigir_login()
+
+# registra a entrada uma única vez por sessão do navegador
+if not st.session_state.get("_login_logado"):
+    registrar(ACAO_LOGIN)
+    st.session_state["_login_logado"] = True
 
 with st.sidebar:
     st.write(f"👤 {st.session_state.get('user_email', '')}")
@@ -39,6 +45,7 @@ with st.sidebar:
             else:
                 try:
                     trocar_senha(nova)
+                    registrar(ACAO_SENHA_PROPRIA)
                     st.success("Senha alterada.")
                 except Exception as e:
                     st.error(f"Não consegui trocar: {e}")
@@ -73,6 +80,13 @@ st.markdown(
 - **🎁 Benefícios** — em breve.
 - **🏛️ Encargos / eSocial** — em breve.
 """
+)
+
+st.subheader("Controle")
+st.markdown(
+    "- **📋 Log de Atividades** — quem fez o quê e quando: entradas no painel, conferências "
+    "rodadas, clientes cadastrados, acessos liberados, mudanças de cargo e de parâmetros "
+    "fiscais. Analista vê o próprio; coordenador e gerente veem a equipe; diretor vê tudo."
 )
 
 if not empresas:
