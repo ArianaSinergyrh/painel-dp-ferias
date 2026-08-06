@@ -1,12 +1,14 @@
 import streamlit as st
 
-from core.auth import exigir_login, empresas_do_usuario, get_client, eh_admin
+from core.auth import (exigir_login, empresas_do_usuario, get_client, eh_admin,
+                       barra_lateral)
 from core.calculo import carregar_workbook, calcular_conferencia, resumo, gerar_excel_bytes, FormatoInvalido
 from core.parametros_db import carregar_parametros
 from core.auditoria import registrar, ACAO_CONFERENCIA, ACAO_HISTORICO
 
 st.set_page_config(page_title="Férias — Painel DP", page_icon="🌴", layout="wide")
 exigir_login()
+barra_lateral()
 
 st.title("🌴 Conferência de Férias")
 st.caption(
@@ -16,24 +18,32 @@ st.caption(
 )
 
 empresas = empresas_do_usuario()
-if not empresas:
+
+# O upload aparece SEMPRE. Antes a página parava aqui quando não havia cliente
+# liberado e o campo de anexar nem chegava a ser desenhado — foi por isso que a
+# Ariana "não achava o lugar de anexar a planilha". Sem cliente dá para conferir
+# e baixar o resultado normalmente; só não dá para gravar no histórico.
+if empresas:
+    nomes_empresas = {e["nome"]: e["id"] for e in empresas}
+    empresa_nome = st.selectbox("Cliente", options=list(nomes_empresas.keys()))
+    empresa_id = nomes_empresas[empresa_nome]
+else:
+    empresa_id = None
+    empresa_nome = "(sem cliente selecionado)"
     if eh_admin():
-        st.warning(
-            "Ainda não há nenhum cliente cadastrado. Vá em **🛠️ Administração → Clientes**, "
-            "cadastre pelo menos um cliente e volte aqui — o campo de upload aparece logo abaixo "
-            "da escolha do cliente."
+        st.info(
+            "Ainda não há cliente cadastrado. Você pode conferir a planilha normalmente "
+            "aqui embaixo — só o registro no histórico fica indisponível. Para cadastrar, "
+            "vá em **🛠️ Administração → Clientes**."
         )
     else:
-        st.warning(
-            "Você não tem acesso a nenhum cliente ainda. Peça a um gerente ou diretor para "
-            "liberar seu acesso em Administração → Acesso da equipe."
+        st.info(
+            "Você ainda não tem cliente liberado. Pode conferir a planilha normalmente "
+            "aqui embaixo — só o registro no histórico fica indisponível. Peça a um "
+            "gerente ou diretor para liberar seu acesso."
         )
-    st.stop()
 
-nomes_empresas = {e["nome"]: e["id"] for e in empresas}
-empresa_nome = st.selectbox("Cliente", options=list(nomes_empresas.keys()))
-empresa_id = nomes_empresas[empresa_nome]
-
+st.markdown("#### 📎 Anexe aqui a planilha exportada do Sinergy")
 arquivo = st.file_uploader("Arquivo mensal (.xlsx)", type=["xlsx"])
 
 if arquivo is not None:
@@ -82,11 +92,13 @@ if arquivo is not None:
     st.download_button(
         "⬇️ Baixar Excel da conferência",
         data=excel_bytes,
-        file_name=f"Conferencia_Ferias_{empresa_nome.replace(' ', '_')}.xlsx",
+        file_name=f"Conferencia_Ferias_{empresa_nome.replace(' ', '_').replace('(', '').replace(')', '')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    if st.button("💾 Registrar este processamento no histórico"):
+    if empresa_id is None:
+        st.caption("ℹ️ Sem cliente selecionado, este processamento não pode ser gravado no histórico.")
+    elif st.button("💾 Registrar este processamento no histórico"):
         sb = get_client()
         sb.table("processamentos").insert({
             "tipo_processo": "ferias",
