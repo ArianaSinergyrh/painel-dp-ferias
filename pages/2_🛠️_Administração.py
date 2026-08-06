@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 
-from core.auth import exigir_login, eh_admin, get_client, CARGOS, enviar_reset_senha
+from core.auth import (exigir_login, eh_admin, get_client, CARGOS, CARGOS_GESTAO,
+                       enviar_reset_senha, recarregar_perfil)
 from core.parametros_db import carregar_parametros, salvar_faixas, salvar_geral
 from core.auditoria import (registrar, ACAO_CLIENTE_NOVO, ACAO_ACESSO_LIBERADO,
                             ACAO_CARGO_ALTERADO, ACAO_PARAMETROS, ACAO_RESET_SENHA)
@@ -55,16 +56,44 @@ with aba_equipe:
                     index=opcoes_lista.index(nome_supervisor_atual) if nome_supervisor_atual in opcoes_lista else 0,
                     key=f"sup_{p['id']}", label_visibility="collapsed",
                 )
+                sou_eu = p["id"] == st.session_state.get("user_id")
+                if sou_eu and novo_cargo not in CARGOS_GESTAO:
+                    col4.caption("⚠️ Você não pode rebaixar o seu próprio cargo.")
+
                 if col4.button("Salvar", key=f"salvar_{p['id']}"):
-                    sb.table("perfis").update({
-                        "cargo": novo_cargo,
-                        "supervisor_id": opcoes_supervisor[novo_supervisor_nome],
-                    }).eq("id", p["id"]).execute()
-                    registrar(ACAO_CARGO_ALTERADO,
-                              detalhe=(f"{p.get('nome_completo') or p['id']}: cargo '{cargo_atual}' → "
-                                       f"'{novo_cargo}'; supervisor → {novo_supervisor_nome}"))
-                    st.success("Atualizado.")
-                    st.rerun()
+                    # Trava de segurança: se a pessoa se rebaixasse para analista ou
+                    # coordenador, perderia na hora o acesso a esta página e ficaria
+                    # sem como voltar — só com SQL direto no banco.
+                    total_diretores = sum(1 for x in perfis_todos if x.get("cargo") == "diretor")
+                    if sou_eu and novo_cargo not in CARGOS_GESTAO:
+                        st.error(
+                            f"Não dá para mudar o seu próprio cargo para '{novo_cargo}': você perderia "
+                            "o acesso a esta página e ficaria travada para fora. Peça a outro gerente "
+                            "ou diretor para fazer essa alteração."
+                        )
+                    elif (sou_eu and cargo_atual == "diretor" and novo_cargo != "diretor"
+                          and total_diretores <= 1):
+                        st.error(
+                            "Você é a única pessoa com cargo de diretor. Promova outra a diretor antes "
+                            "de mudar o seu próprio cargo, senão a empresa fica sem ninguém com acesso "
+                            "a todos os clientes."
+                        )
+                    else:
+                        sb.table("perfis").update({
+                            "cargo": novo_cargo,
+                            "supervisor_id": opcoes_supervisor[novo_supervisor_nome],
+                        }).eq("id", p["id"]).execute()
+                        registrar(ACAO_CARGO_ALTERADO,
+                                  detalhe=(f"{p.get('nome_completo') or p['id']}: cargo '{cargo_atual}' → "
+                                           f"'{novo_cargo}'; supervisor → {novo_supervisor_nome}"))
+                        if sou_eu:
+                            # atualiza a própria sessão na hora, sem precisar sair e entrar
+                            try:
+                                recarregar_perfil()
+                            except Exception:
+                                pass
+                        st.success("Atualizado.")
+                        st.rerun()
                 email_pessoa = p.get("email")
                 if email_pessoa:
                     if st.button(f"✉️ Enviar redefinição de senha ({email_pessoa})", key=f"reset_{p['id']}"):
