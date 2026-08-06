@@ -19,7 +19,18 @@ import streamlit as st
 from supabase import create_client, Client
 
 CARGOS = ["analista", "coordenador", "gerente", "diretor"]
-CARGOS_GESTAO = ("gerente", "diretor")  # quem tem acesso à página de Administração
+
+# Nível de cada cargo. Serve para responder "posso mexer no cargo desta pessoa?"
+# — a regra é que ninguém concede um cargo acima do seu nem altera o cargo de
+# quem está acima. Precisa bater com a função nivel_cargo() do banco.
+NIVEL_CARGO = {"analista": 0, "coordenador": 1, "gerente": 2, "diretor": 3}
+
+# Cadastro de clientes e tabelas de INSS/IRRF: só gerente e diretor, porque um
+# erro ali afeta o cálculo de todos os clientes.
+CARGOS_GESTAO = ("gerente", "diretor")
+
+# Cargos e acessos da equipe: coordenador para cima.
+CARGOS_EQUIPE = ("coordenador", "gerente", "diretor")
 
 
 @st.cache_resource
@@ -159,8 +170,34 @@ def cargo_do_usuario() -> str:
 
 
 def eh_admin() -> bool:
-    """Quem gerencia clientes, equipe e parâmetros fiscais (gerente/diretor)."""
+    """Quem cadastra clientes e mexe nas tabelas fiscais (gerente/diretor)."""
     return cargo_do_usuario() in CARGOS_GESTAO
+
+
+def gere_equipe() -> bool:
+    """Quem define cargos e libera acessos da equipe (coordenador para cima)."""
+    return cargo_do_usuario() in CARGOS_EQUIPE
+
+
+def meu_nivel() -> int:
+    return NIVEL_CARGO.get(cargo_do_usuario(), 0)
+
+
+def cargos_que_posso_conceder() -> list:
+    """Ninguém concede um cargo acima do seu."""
+    return [c for c in CARGOS if NIVEL_CARGO[c] <= meu_nivel()]
+
+
+def posso_alterar_cargo_de(perfil: dict) -> tuple:
+    """Diz se dá para mexer no cargo desta pessoa e, se não der, por quê.
+    Retorna (pode, motivo)."""
+    if perfil.get("id") == st.session_state.get("user_id"):
+        return False, "Ninguém altera o próprio cargo — peça a um diretor."
+    if not gere_equipe():
+        return False, "Seu cargo não permite alterar cargos."
+    if NIVEL_CARGO.get(perfil.get("cargo", "analista"), 0) > meu_nivel():
+        return False, "Esta pessoa tem cargo acima do seu."
+    return True, ""
 
 
 def empresas_do_usuario() -> list:
