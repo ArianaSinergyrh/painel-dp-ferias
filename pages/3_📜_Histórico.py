@@ -1,10 +1,11 @@
 import pandas as pd
 import streamlit as st
 
-from core.auth import exigir_login, empresas_do_usuario, get_client
+from core.auth import exigir_login, empresas_do_usuario, get_client, barra_lateral
 
 st.set_page_config(page_title="Histórico — Painel DP", page_icon="📜", layout="wide")
 exigir_login()
+barra_lateral()
 
 st.title("📜 Histórico de processamentos")
 
