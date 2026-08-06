@@ -190,11 +190,16 @@ def cargos_que_posso_conceder() -> list:
 
 def posso_alterar_cargo_de(perfil: dict) -> tuple:
     """Diz se dá para mexer no cargo desta pessoa e, se não der, por quê.
-    Retorna (pode, motivo)."""
-    if perfil.get("id") == st.session_state.get("user_id"):
-        return False, "Ninguém altera o próprio cargo — peça a um diretor."
+    Retorna (pode, motivo).
+
+    O diretor pode mexer no próprio cargo — é o topo da hierarquia e responde
+    pela empresa. Coordenador e gerente não podem, porque se rebaixassem a si
+    mesmos perderiam o acesso e ficariam dependendo de outra pessoa."""
+    sou_eu = perfil.get("id") == st.session_state.get("user_id")
     if not gere_equipe():
         return False, "Seu cargo não permite alterar cargos."
+    if sou_eu and cargo_do_usuario() != "diretor":
+        return False, "Você não altera o seu próprio cargo — peça a um diretor."
     if NIVEL_CARGO.get(perfil.get("cargo", "analista"), 0) > meu_nivel():
         return False, "Esta pessoa tem cargo acima do seu."
     return True, ""
