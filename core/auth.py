@@ -30,15 +30,35 @@ def get_client() -> Client:
 
 
 def sign_in(email: str, password: str):
+    """Autentica e só marca a sessão como logada DEPOIS que o perfil (cargo e
+    clientes) foi carregado com sucesso.
+
+    Isso é importante: se o carregamento do perfil falhar no meio do caminho,
+    a sessão não pode ficar "meio logada" — antes isso acontecia e o painel
+    seguia funcionando com o perfil vazio, caindo no padrão 'analista' mesmo
+    para quem é diretor no banco. Agora, se algo falhar, o login falha de
+    forma visível e a sessão é limpa."""
     sb = get_client()
     resp = sb.auth.sign_in_with_password({"email": email, "password": password})
     if resp.user is None:
         raise RuntimeError("Login ou senha inválidos.")
+
+    try:
+        perfil, empresas = _buscar_perfil(resp.user.id)
+    except Exception:
+        # não deixa resquício de sessão pela metade
+        try:
+            sb.auth.sign_out()
+        except Exception:
+            pass
+        raise
+
     st.session_state["access_token"] = resp.session.access_token
     st.session_state["refresh_token"] = resp.session.refresh_token
     st.session_state["user_id"] = resp.user.id
     st.session_state["user_email"] = resp.user.email
-    _load_perfil(resp.user.id)
+    st.session_state["perfil"] = perfil
+    st.session_state["empresas_acessiveis"] = empresas
 
 
 def sign_up(email: str, password: str, nome_completo: str):
@@ -80,13 +100,25 @@ def sign_out():
         st.session_state.pop(k, None)
 
 
-def _load_perfil(user_id: str):
+def _buscar_perfil(user_id: str):
+    """Lê o perfil (cargo, nome) e a lista de clientes que o usuário enxerga.
+    Devolve (perfil, empresas). Levanta exceção se não conseguir ler o perfil —
+    é melhor falhar de forma visível do que assumir 'analista' silenciosamente."""
     sb = get_client()
     perfil = sb.table("perfis").select("*").eq("id", user_id).single().execute()
-    dados = perfil.data if perfil.data else {"cargo": "analista", "is_admin": False, "nome_completo": ""}
-    st.session_state["perfil"] = dados
+    dados = perfil.data
+    if not dados:
+        raise RuntimeError(
+            "Seu usuário está autenticado, mas não encontrei o perfil correspondente "
+            "na tabela 'perfis'. Peça para um diretor verificar o cadastro."
+        )
+    if not dados.get("cargo"):
+        raise RuntimeError(
+            "Seu perfil não tem cargo definido. Peça para um gerente ou diretor "
+            "ajustar o cargo na página de Administração."
+        )
 
-    cargo = dados.get("cargo", "analista")
+    cargo = dados["cargo"]
     if cargo == "diretor":
         empresas = sb.table("empresas").select("*").eq("ativo", True).order("nome").execute()
         empresas_data = empresas.data
@@ -107,7 +139,15 @@ def _load_perfil(user_id: str):
             if e:
                 vistos[e["id"]] = e
         empresas_data = list(vistos.values())
-    st.session_state["empresas_acessiveis"] = empresas_data
+    return dados, empresas_data
+
+
+def recarregar_perfil():
+    """Relê cargo e clientes do banco sem precisar sair e entrar de novo.
+    Útil logo depois que um diretor muda o cargo de alguém."""
+    perfil, empresas = _buscar_perfil(st.session_state["user_id"])
+    st.session_state["perfil"] = perfil
+    st.session_state["empresas_acessiveis"] = empresas
 
 
 def esta_logado() -> bool:
