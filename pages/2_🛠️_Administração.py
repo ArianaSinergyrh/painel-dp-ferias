@@ -3,13 +3,15 @@ import pandas as pd
 
 from core.auth import (exigir_login, eh_admin, gere_equipe, get_client, CARGOS,
                        enviar_reset_senha, recarregar_perfil,
-                       cargos_que_posso_conceder, posso_alterar_cargo_de)
+                       cargos_que_posso_conceder, posso_alterar_cargo_de,
+                       pode_editar_parametros, barra_lateral)
 from core.parametros_db import carregar_parametros, salvar_faixas, salvar_geral
 from core.auditoria import (registrar, ACAO_CLIENTE_NOVO, ACAO_ACESSO_LIBERADO,
                             ACAO_CARGO_ALTERADO, ACAO_PARAMETROS, ACAO_RESET_SENHA)
 
 st.set_page_config(page_title="Administração — Painel DP", page_icon="🛠️", layout="wide")
 exigir_login()
+barra_lateral()
 
 if not gere_equipe():
     st.error("Esta página é restrita a coordenadores, gerentes e diretores.")
@@ -25,8 +27,12 @@ if eh_admin():
         ["Equipe (cargos e hierarquia)", "Clientes", "Acesso da equipe", "Parâmetros fiscais (Férias)"]
     )
 else:
-    aba_equipe, aba_acesso = st.tabs(["Equipe (cargos e hierarquia)", "Acesso da equipe"])
-    aba_clientes = aba_parametros = None
+    # Coordenador: equipe, acessos e tabelas de INSS/IRRF. Cadastro de cliente
+    # novo continua só com gerente e diretor.
+    aba_equipe, aba_acesso, aba_parametros = st.tabs(
+        ["Equipe (cargos e hierarquia)", "Acesso da equipe", "Parâmetros fiscais (Férias)"]
+    )
+    aba_clientes = None
 
 # -------------------------------------------------------------------- Equipe
 with aba_equipe:
@@ -194,7 +200,7 @@ with aba_acesso:
     )
 
 # --------------------------------------------------------- Parâmetros fiscais
-if aba_parametros is not None:
+if aba_parametros is not None and pode_editar_parametros():
   with aba_parametros:
       st.subheader("Tabelas de INSS e IRRF usadas no recálculo de férias")
       st.caption("Atualize aqui quando a legislação mudar — não precisa mexer em código.")
